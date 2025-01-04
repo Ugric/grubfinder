@@ -1,14 +1,18 @@
+import 'dart:convert';
+import 'dart:js_interop';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 import 'package:grubfinder/person.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:grubfinder/toast.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'geolocation.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
+
+const apiVersion = "0.0.1";
 
 void main() {
   runApp(const MyApp());
@@ -22,21 +26,21 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Grub Finder',
+      builder: FToastBuilder(),
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-            seedColor: Colors.pink, brightness: Brightness.light),
+            seedColor: Colors.deepPurple, brightness: Brightness.light),
         /* light theme settings */
 
         useMaterial3: true,
       ),
       darkTheme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-            seedColor: Colors.pink, brightness: Brightness.dark),
+            seedColor: Colors.deepPurple, brightness: Brightness.dark),
         /* light theme settings */
 
         useMaterial3: true,
       ),
-      themeMode: ThemeMode.dark,
       home: const MyHomePage(title: 'Grub Finder'),
     );
   }
@@ -62,78 +66,158 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   bool loading = true;
-  MapController? _mapController;
+  late FToast fToast;
+  bool initilised = false;
+  String url = "";
+  SharedPreferences? storage;
   int currentPageIndex = 0;
-  Position? currentPos;
 
   @override
   void initState() {
     super.initState();
-    _mapController = MapController();
+    fToast = FToast();
+    // if you want to use context from globally instead of content we need to pass navigatorKey.currentContext!
+    fToast.init(context);
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
-    loading = false;
+    SharedPreferences.getInstance().then((storage_) {
+      setState(() {
+        storage = storage_;
+        loading = false;
+        initilised = storage!.getBool('init') ?? false;
+        initilised = false;
+        url = storage!.getString('url') ?? "";
+      });
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    if (loading) {
+      return Scaffold(
+          body: Center(
+              child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 20),
+          Text('Loading, please wait...'),
+        ],
+      )));
+    } else if (!initilised) {
+      return Scaffold(
+          appBar: AppBar(
+            title: Text("Grub Finder"),
+            centerTitle: true,
+            backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+          ),
+          body: Center(
+              child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                TextFormField(
+                  textCapitalization: TextCapitalization.none,
+                  spellCheckConfiguration: SpellCheckConfiguration(
+                    spellCheckService: null,
+                  ),
+                  decoration: const InputDecoration(
+                      border: UnderlineInputBorder(),
+                      labelText: 'Server URL',
+                      hintText: "https://example.com/"),
+                  onChanged: (value) {
+                    setState(() {
+                      url = value;
+                    });
+                  },
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    setState(() {
+                      loading = true;
+                    });
+                    try {
+                      if (!(Uri.tryParse(url)?.hasAbsolutePath ?? false)) {
+                        setState(() {
+                          loading = false;
+                        });
+                        return showToast(fToast, "Invalid URL");
+                      }
+                      http.Response resp =
+                          await http.get(Uri.parse(p.join(url, 'api/version')));
+                      if (resp.statusCode != 200) {
+                        setState(() {
+                          loading = false;
+                        });
+                        return showToast(fToast, "Invalid Grub Finder Server, got status code ${resp.statusCode}");
+                      }
+                      if (apiVersion != jsonDecode(resp.body)) {
+                        showToast(fToast, "Warning: apps API version and servers do not match.");
+                      }
+                      setState(() {
+                        initilised = true;
+                        loading = false;
+                      });
+                      storage!.setString("url", url);
+                        storage!.setBool("init", true);
+                      } catch (e) {
+                      setState(() {
+                        loading = false;
+                        url = '';
+                      });
+                      return showToast(fToast, "There was an error.");
+                    }
+                  },
+                  child: const Text('Submit'),
+                )
+              ])));
+    }
     // This method is rerun every time setState is called, for instance as done
     // by the _incrementCounter method above.
     //
     // The Flutter framework has been optimized to make rerunning build methods
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
-    return loading
-        ? Scaffold(
-            body: Center(
-                child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 20),
-              Text('Loading, please wait...'),
-            ],
-          )))
-        : Scaffold(
-            extendBodyBehindAppBar: false,
-            appBar: AppBar(
-              title: Text("Grub Finder"),
-              centerTitle: true,
-              backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-            ),
-            body: currentPageIndex == 0 ? content() : null,
-            bottomNavigationBar: NavigationBar(
-              onDestinationSelected: (int index) {
-                setState(() {
-                  currentPageIndex = index;
-                });
-              },
-              backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-              selectedIndex: currentPageIndex,
-              destinations: const <Widget>[
-                NavigationDestination(
-                  selectedIcon: Icon(Icons.group),
-                  icon: Icon(Icons.group_outlined),
-                  label: 'People',
-                ),
-                NavigationDestination(
-                  selectedIcon: Icon(Icons.devices),
-                  icon: Icon(Icons.devices_outlined),
-                  label: 'Devices',
-                ),
-                NavigationDestination(
-                  selectedIcon: Icon(Icons.account_circle),
-                  icon: Icon(Icons.account_circle_outlined),
-                  label: 'Me',
-                ),
-              ],
-            ),
-          );
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Grub Finder"),
+        centerTitle: true,
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+      ),
+      body: content().elementAt(currentPageIndex),
+      bottomNavigationBar: NavigationBar(
+        onDestinationSelected: (int index) {
+          setState(() {
+            currentPageIndex = index;
+            initilised = false;
+          });
+        },
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        selectedIndex: currentPageIndex,
+        destinations: const <Widget>[
+          NavigationDestination(
+            selectedIcon: Icon(Icons.group),
+            icon: Icon(Icons.group_outlined),
+            label: 'People',
+          ),
+          NavigationDestination(
+            selectedIcon: Icon(Icons.devices),
+            icon: Icon(Icons.devices_outlined),
+            label: 'Devices',
+          ),
+          NavigationDestination(
+            selectedIcon: Icon(Icons.account_circle),
+            icon: Icon(Icons.account_circle_outlined),
+            label: 'Me',
+          ),
+        ],
+      ),
+    );
   }
 
-  Widget content() {
+  List<Widget> content() {
+    /*
     return FlutterMap(
         mapController: _mapController,
         options: MapOptions(
@@ -147,55 +231,11 @@ class _MyHomePageState extends State<MyHomePage> {
           initialZoom: 1.0,
         ),
         children: [
-          Theme.of(context).brightness == Brightness.dark
-              ? openStreetMapTileLayerDark
-              : openStreetMapTileLayer,
+          openStreetMapTileLayer(Theme.of(context).brightness == Brightness.dark),
           MarkerLayer(markers: [])
         ]);
-     /*
-    return FutureBuilder<Position>(
-        future: determinePosition(),
-        builder: (context, snapshot) {
-          // Show loading screen while waiting
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(child: CircularProgressIndicator());
-          }
-
-          // Handle errors if any occur while getting location
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-
-          // Once location is obtained, show the map
-          if (snapshot.hasData) {
-            Position position = snapshot.data!;
-            return FlutterMap(
-                mapController: _mapController,
-                options: MapOptions(
-                  backgroundColor:
-                      Theme.of(context).brightness == Brightness.dark
-                          ? Colors.black
-                          : Colors.white,
-                  initialCenter: LatLng(position.latitude, position.longitude),
-                  minZoom: 1.0,
-                  maxZoom: 23.0,
-                  interactionOptions: const InteractionOptions(
-                      flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag),
-                  initialZoom: 17.0,
-                ),
-                children: [
-                  Theme.of(context).brightness == Brightness.dark
-                      ? openStreetMapTileLayerDark
-                      : openStreetMapTileLayer,
-                  MarkerLayer(markers: [
-                    personMarker(position, _mapController, context)
-                  ])
-                ]);
-          }
-
-          return Center(child: Text('No location data available.'));
-        });
-      */
+     */
+    return [PeopleMap(), const SizedBox.shrink(), const SizedBox.shrink()];
   }
 }
 
@@ -215,13 +255,8 @@ Widget _darkModeTileBuilder(
   );
 }
 
-TileLayer get openStreetMapTileLayer => TileLayer(
+TileLayer openStreetMapTileLayer(bool darkMode) => TileLayer(
       urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
       userAgentPackageName: 'dev.wbell.grubfinder',
-    );
-
-TileLayer get openStreetMapTileLayerDark => TileLayer(
-      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-      userAgentPackageName: 'dev.wbell.grubfinder',
-      tileBuilder: _darkModeTileBuilder,
+      tileBuilder: darkMode ? _darkModeTileBuilder : null,
     );
