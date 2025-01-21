@@ -1,5 +1,4 @@
 import 'package:geolocator/geolocator.dart';
-import 'dart:developer';
 
 
 /// Determine the current position of the device.

@@ -1,16 +1,11 @@
-import 'dart:convert';
-import 'dart:js_interop';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:grubfinder/person.dart';
-import 'package:grubfinder/toast.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
-import 'package:path/path.dart' as p;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 const apiVersion = "0.0.1";
 
@@ -29,14 +24,14 @@ class MyApp extends StatelessWidget {
       builder: FToastBuilder(),
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-            seedColor: Colors.deepPurple, brightness: Brightness.light),
+            seedColor: Colors.deepOrange, brightness: Brightness.light),
         /* light theme settings */
 
         useMaterial3: true,
       ),
       darkTheme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-            seedColor: Colors.deepPurple, brightness: Brightness.dark),
+            seedColor: Colors.deepOrange, brightness: Brightness.dark),
         /* light theme settings */
 
         useMaterial3: true,
@@ -68,9 +63,10 @@ class _MyHomePageState extends State<MyHomePage> {
   bool loading = true;
   late FToast fToast;
   bool initilised = false;
-  String url = "";
+  String baseURL = "";
   SharedPreferences? storage;
   int currentPageIndex = 0;
+  TextEditingController txtController = TextEditingController();
 
   @override
   void initState() {
@@ -82,15 +78,20 @@ class _MyHomePageState extends State<MyHomePage> {
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
-    SharedPreferences.getInstance().then((storage_) {
-      setState(() {
-        storage = storage_;
-        loading = false;
-        initilised = storage!.getBool('init') ?? false;
-        initilised = false;
-        url = storage!.getString('url') ?? "";
+      SharedPreferences.getInstance().then((storage_) {
+        setState(() {
+          storage = storage_;
+          loading = false;
+          if (kIsWeb) {
+            initilised = true;
+            baseURL="/";
+          } else {
+            initilised = storage!.getBool('init') ?? false;
+            baseURL = storage!.getString('url') ?? "";
+          }
+        });
       });
-    });
+
   }
 
   @override
@@ -107,9 +108,10 @@ class _MyHomePageState extends State<MyHomePage> {
         ],
       )));
     } else if (!initilised) {
-      return Scaffold(
+
+      /*return Scaffold(
           appBar: AppBar(
-            title: Text("Grub Finder"),
+            title: Text(widget.title),
             centerTitle: true,
             backgroundColor: Theme.of(context).colorScheme.inversePrimary,
           ),
@@ -118,6 +120,9 @@ class _MyHomePageState extends State<MyHomePage> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                 TextFormField(
+                  controller: txtController,
+                  onSaved: (value) =>
+                      setState(() {baseURL = value!;}),
                   textCapitalization: TextCapitalization.none,
                   spellCheckConfiguration: SpellCheckConfiguration(
                     spellCheckService: null,
@@ -126,11 +131,6 @@ class _MyHomePageState extends State<MyHomePage> {
                       border: UnderlineInputBorder(),
                       labelText: 'Server URL',
                       hintText: "https://example.com/"),
-                  onChanged: (value) {
-                    setState(() {
-                      url = value;
-                    });
-                  },
                 ),
                 ElevatedButton(
                   onPressed: () async {
@@ -138,14 +138,14 @@ class _MyHomePageState extends State<MyHomePage> {
                       loading = true;
                     });
                     try {
-                      if (!(Uri.tryParse(url)?.hasAbsolutePath ?? false)) {
+                      if (!(Uri.tryParse(txtController.text)?.hasAbsolutePath ?? false)) {
                         setState(() {
                           loading = false;
                         });
-                        return showToast(fToast, "Invalid URL");
+                        return showToast(fToast, "Invalid URL: $txtController.text");
                       }
                       http.Response resp =
-                          await http.get(Uri.parse(p.join(url, 'api/version')));
+                          await http.get(Uri.parse(widget.baseURL).resolve("api/version"));
                       if (resp.statusCode != 200) {
                         setState(() {
                           loading = false;
@@ -158,20 +158,20 @@ class _MyHomePageState extends State<MyHomePage> {
                       setState(() {
                         initilised = true;
                         loading = false;
+                        baseURL = txtController.text;
                       });
-                      storage!.setString("url", url);
+                      storage!.setString("url", baseURL);
                         storage!.setBool("init", true);
                       } catch (e) {
                       setState(() {
                         loading = false;
-                        url = '';
                       });
                       return showToast(fToast, "There was an error.");
                     }
                   },
                   child: const Text('Submit'),
                 )
-              ])));
+              ])));*/
     }
     // This method is rerun every time setState is called, for instance as done
     // by the _incrementCounter method above.
@@ -181,7 +181,7 @@ class _MyHomePageState extends State<MyHomePage> {
     // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        title: Text("Grub Finder"),
+        title: Text(widget.title),
         centerTitle: true,
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
@@ -190,7 +190,6 @@ class _MyHomePageState extends State<MyHomePage> {
         onDestinationSelected: (int index) {
           setState(() {
             currentPageIndex = index;
-            initilised = false;
           });
         },
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
@@ -235,7 +234,7 @@ class _MyHomePageState extends State<MyHomePage> {
           MarkerLayer(markers: [])
         ]);
      */
-    return [PeopleMap(), const SizedBox.shrink(), const SizedBox.shrink()];
+    return [PeopleMap(baseURL: baseURL), const SizedBox.shrink(), const SizedBox.shrink()];
   }
 }
 
